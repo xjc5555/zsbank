@@ -4,25 +4,24 @@ import {
   ArrowUp,
   Bot,
   CalendarHeart,
-  ChevronDown,
-  ChevronUp,
   Coffee,
   Pencil,
-  PiggyBank,
   Plus,
   ShieldAlert,
   Sparkles,
+  Trash2,
   WalletCards,
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-
-const PieChart = dynamic(() => import("recharts").then((mod) => mod.PieChart), { ssr: false });
-const Pie = dynamic(() => import("recharts").then((mod) => mod.Pie), { ssr: false });
-const Cell = dynamic(() => import("recharts").then((mod) => mod.Cell), { ssr: false });
-const ResponsiveContainer = dynamic(() => import("recharts").then((mod) => mod.ResponsiveContainer), { ssr: false });
-const Tooltip = dynamic(() => import("recharts").then((mod) => mod.Tooltip), { ssr: false });
+// 直接静态引入，避免动态 import 拆散导致 Cell fill 失效
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
 
 // ─────────────────── 类型 ───────────────────
 
@@ -113,7 +112,7 @@ const quickPromptGroups = [
   },
 ];
 
-const PIE_COLORS = ["#12b892", "#36d1a8", "#78e9c7", "#f59e0b", "#6366f1", "#f43f5e", "#8b5cf6"];
+const PIE_COLORS = ["#10b981", "#f59e0b", "#6366f1", "#f43f5e", "#0ea5e9", "#8b5cf6", "#f97316"];
 
 const CATEGORY_EMOJI: Record<string, string> = {
   餐饮: "🍜",
@@ -225,11 +224,11 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
 
   // UI 状态
-  const [showStats, setShowStats] = useState(false);
   const [showBudgetEdit, setShowBudgetEdit] = useState(false);
   const [budgetInput, setBudgetInput] = useState("");
   const [activeQuickGroup, setActiveQuickGroup] = useState(0);
-  const [showWishEdit, setShowWishEdit] = useState(false);
+  // 心愿表单：editingIndex=-1 表示新建，>=0 表示编辑对应索引
+  const [editingIndex, setEditingIndex] = useState<number>(-2); // -2=关闭
   // 心愿表单字段
   const [wishFormName, setWishFormName] = useState("");
   const [wishFormTarget, setWishFormTarget] = useState("");
@@ -298,12 +297,16 @@ export default function Home() {
   const budgetDanger = budgetLeft <= 0;
 
   // ── 发送消息 ──
+  // overrideWishlists / overrideActiveIdx：心愿表单提交时传入已更新的值，
+  // 避免 React state 异步更新导致闭包捕获旧值被后端响应覆盖
   const sendMessage = useCallback(
-    async (nextInput?: string) => {
+    async (nextInput?: string, overrideWishlists?: WishlistItem[], overrideActiveIdx?: number) => {
       const content = (nextInput ?? input).trim();
       if (!content || isLoading) return;
 
       const history = messages;
+      const currentWishlists = overrideWishlists ?? wishlists;
+      const currentActiveIdx = overrideActiveIdx ?? activeWishlistIndex;
       setInput("");
       setIsLoading(true);
       setMessages([...history, { role: "user", content }]);
@@ -317,8 +320,8 @@ export default function Home() {
             history,
             budget_total: budgetTotal,
             budget_left: budgetLeft,
-            wishlists,
-            active_wishlist_index: activeWishlistIndex,
+            wishlists: currentWishlists,
+            active_wishlist_index: currentActiveIdx,
             expense_records: expenseRecords,
             finance_profile: financeProfile,
           }),
@@ -369,20 +372,37 @@ export default function Home() {
     setBudgetInput("");
   }
 
-  // ── 打开心愿编辑表单（预填当前活跃心愿数据）──
-  function openWishEdit() {
-    if (activeWishlist) {
-      setWishFormName(activeWishlist.name);
-      setWishFormTarget(String(activeWishlist.target_amount || ""));
-      setWishFormMonths(String(activeWishlist.months || "12"));
-      setWishFormSaved(String(activeWishlist.saved_amount || "0"));
-    } else {
-      setWishFormName("");
-      setWishFormTarget("");
-      setWishFormMonths("12");
-      setWishFormSaved("0");
-    }
-    setShowWishEdit((v) => !v);
+  // ── 打开新建心愿表单 ──
+  function openNewWish() {
+    setWishFormName("");
+    setWishFormTarget("");
+    setWishFormMonths("12");
+    setWishFormSaved("0");
+    setEditingIndex(-1);
+  }
+
+  // ── 打开编辑已有心愿表单 ──
+  function openEditWish(idx: number) {
+    const w = wishlists[idx];
+    if (!w) return;
+    setWishFormName(w.name);
+    setWishFormTarget(String(w.target_amount || ""));
+    setWishFormMonths(String(w.months || "12"));
+    setWishFormSaved(String(w.saved_amount || "0"));
+    setEditingIndex(idx);
+  }
+
+  // ── 关闭心愿表单 ──
+  function closeWishForm() {
+    setEditingIndex(-2);
+  }
+
+  // ── 删除心愿 ──
+  function deleteWish(idx: number) {
+    const updated = wishlists.filter((_, i) => i !== idx);
+    const newActiveIdx = Math.min(activeWishlistIndex, Math.max(0, updated.length - 1));
+    setWishlists(updated);
+    setActiveWishlistIndex(newActiveIdx);
   }
 
   // ── 提交心愿表单 ──
@@ -392,18 +412,21 @@ export default function Home() {
     const months = Math.max(1, parseInt(wishFormMonths) || 12);
     const saved = Math.max(0, parseFloat(wishFormSaved) || 0);
 
-    if (target <= 0) return; // 目标金额必填
+    if (target <= 0) return;
 
     const updatedWishlists = [...wishlists];
-    if (activeWishlist && activeWishlistIndex < updatedWishlists.length) {
-      // 编辑现有心愿
-      updatedWishlists[activeWishlistIndex] = {
-        ...updatedWishlists[activeWishlistIndex],
+    let newActiveIdx: number;
+
+    if (editingIndex >= 0 && editingIndex < updatedWishlists.length) {
+      // 编辑已有心愿
+      updatedWishlists[editingIndex] = {
+        ...updatedWishlists[editingIndex],
         name,
         target_amount: target,
         months,
         saved_amount: saved,
       };
+      newActiveIdx = editingIndex;
     } else {
       // 新建心愿
       updatedWishlists.push({
@@ -413,16 +436,19 @@ export default function Home() {
         months,
         saved_amount: saved,
       });
-      setActiveWishlistIndex(updatedWishlists.length - 1);
+      newActiveIdx = updatedWishlists.length - 1;
     }
-    setWishlists(updatedWishlists);
-    setShowWishEdit(false);
 
-    // 发一条自然语言给 AI，让它给出鼓励/规划反馈
+    setWishlists(updatedWishlists);
+    setActiveWishlistIndex(newActiveIdx);
+    setEditingIndex(-2);
+
     const remaining = Math.max(0, target - saved);
     const monthlySaving = Math.ceil((remaining / months) * 100) / 100;
     void sendMessage(
-      `我设置了「${name}」心愿，目标 ${target} 元，已攒 ${saved} 元，计划 ${months} 个月完成，每月需攒 ${monthlySaving} 元。`
+      `我设置了「${name}」心愿，目标 ${target} 元，已攒 ${saved} 元，计划 ${months} 个月完成，每月需攒 ${monthlySaving} 元。`,
+      updatedWishlists,
+      newActiveIdx
     );
   }
 
@@ -480,9 +506,8 @@ export default function Home() {
           </p>
         </header>
 
-        {/* ── 状态卡片区 ── */}
-        <section className="grid grid-cols-2 gap-3 px-4 pt-4">
-          {/* 预算卡片 */}
+        {/* ── 状态卡片区：预算 ── */}
+        <section className="px-4 pt-4">
           <div
             className={`rounded-3xl p-4 shadow-sm ring-1 ${
               budgetDanger
@@ -509,10 +534,12 @@ export default function Home() {
                 <Pencil className="h-3.5 w-3.5" />
               </button>
             </div>
-            <p className={`mt-2 text-2xl font-black ${budgetDanger ? "text-red-600" : budgetWarning ? "text-amber-600" : ""}`}>
-              {formatMoney(budgetLeft)}
-            </p>
-            {/* 预算进度条 */}
+            <div className="flex items-end justify-between">
+              <p className={`mt-2 text-2xl font-black ${budgetDanger ? "text-red-600" : budgetWarning ? "text-amber-600" : ""}`}>
+                {formatMoney(budgetLeft)}
+              </p>
+              <p className="mb-0.5 text-xs text-slate-400">共 {formatMoney(budgetTotal)}</p>
+            </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
               <div
                 className={`h-1.5 rounded-full transition-all ${
@@ -521,58 +548,109 @@ export default function Home() {
                 style={{ width: `${(1 - budgetUsedRatio) * 100}%` }}
               />
             </div>
-            <p className="mt-1 text-xs text-slate-400">共 {formatMoney(budgetTotal)}</p>
           </div>
-
-          {/* 心愿卡片 */}
-          <button
-            className="rounded-3xl bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-400 p-4 text-white shadow-sm transition-all hover:brightness-105 active:scale-[0.98] text-left w-full"
-            onClick={openWishEdit}
-            type="button"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-white/90">
-                <CalendarHeart className="h-4 w-4" />
-                {activeWishlist ? activeWishlist.name : "心愿"}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {wishlists.length > 1 && (
-                  <span className="rounded-full bg-white/25 px-1.5 py-0.5 text-xs text-white/90">
-                    {activeWishlistIndex + 1}/{wishlists.length}
-                  </span>
-                )}
-                <Pencil className="h-3.5 w-3.5 text-white/70" />
-              </div>
-            </div>
-            {activeWishlist ? (
-              <>
-                <p className="mt-2 text-2xl font-black text-white">{calcProgress(activeWishlist.saved_amount, activeWishlist.target_amount)}%</p>
-                <div className="mt-2 h-1.5 rounded-full bg-white/30">
-                  <div
-                    className="h-1.5 rounded-full bg-white transition-all"
-                    style={{ width: `${calcProgress(activeWishlist.saved_amount, activeWishlist.target_amount)}%` }}
-                  />
-                </div>
-                <p className="mt-1 text-xs text-white/75">
-                  月存 {formatMoney(calcMonthlyNeeded(activeWishlist))} · 目标 {formatMoney(activeWishlist.target_amount)}
-                </p>
-              </>
-            ) : (
-              <p className="mt-3 text-sm text-white/80">点击输入心愿，我帮你拆计划 ✨</p>
-            )}
-          </button>
         </section>
 
-        {/* ── 心愿编辑表单弹出框 ── */}
-        {showWishEdit && (
+        {/* ── 心愿轮播区 ── */}
+        <section className="mt-3 px-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+              <CalendarHeart className="h-4 w-4" />
+              我的心愿
+              {wishlists.length > 0 && (
+                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-bold text-emerald-600">{wishlists.length}</span>
+              )}
+            </span>
+            <button
+              className="flex items-center gap-1 rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-600"
+              onClick={openNewWish}
+              type="button"
+            >
+              <Plus className="h-3 w-3" />
+              新建
+            </button>
+          </div>
+
+          {wishlists.length === 0 ? (
+            /* 空状态 */
+            <button
+              className="w-full rounded-3xl border-2 border-dashed border-emerald-200 bg-white/60 py-6 text-center text-sm text-slate-400 hover:border-emerald-300 hover:text-emerald-500 transition-colors"
+              onClick={openNewWish}
+              type="button"
+            >
+              <CalendarHeart className="mx-auto mb-1.5 h-6 w-6 opacity-40" />
+              还没有心愿，点击新建一个 ✨
+            </button>
+          ) : (
+            /* 横向滚动卡片 */
+            <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2" style={{ scrollSnapType: "x mandatory" }}>
+              {wishlists.map((w, idx) => (
+                <div
+                  key={w.id}
+                  className={`relative shrink-0 w-48 rounded-3xl p-4 text-white shadow-sm transition-all ${
+                    idx === activeWishlistIndex
+                      ? "bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-400 ring-2 ring-emerald-300 ring-offset-1"
+                      : "bg-gradient-to-br from-emerald-300 via-teal-300 to-cyan-300 opacity-80"
+                  }`}
+                  style={{ scrollSnapAlign: "start" }}
+                >
+                  {/* 操作按钮 */}
+                  <div className="absolute right-2 top-2 flex gap-1">
+                    <button
+                      className="rounded-full bg-white/20 p-1 hover:bg-white/40"
+                      onClick={(e) => { e.stopPropagation(); openEditWish(idx); }}
+                      type="button"
+                      title="编辑"
+                    >
+                      <Pencil className="h-3 w-3 text-white" />
+                    </button>
+                    <button
+                      className="rounded-full bg-white/20 p-1 hover:bg-red-400/60"
+                      onClick={(e) => { e.stopPropagation(); deleteWish(idx); }}
+                      type="button"
+                      title="删除"
+                    >
+                      <Trash2 className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+
+                  {/* 卡片内容，点击激活 */}
+                  <button
+                    className="w-full text-left"
+                    onClick={() => setActiveWishlistIndex(idx)}
+                    type="button"
+                  >
+                    <p className="pr-12 text-xs font-semibold text-white/90 truncate">{w.name}</p>
+                    <p className="mt-2 text-2xl font-black">{calcProgress(w.saved_amount, w.target_amount)}%</p>
+                    <div className="mt-1.5 h-1.5 rounded-full bg-white/30">
+                      <div
+                        className="h-1.5 rounded-full bg-white transition-all"
+                        style={{ width: `${calcProgress(w.saved_amount, w.target_amount)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-xs text-white/80">
+                      月存 {formatMoney(calcMonthlyNeeded(w))}
+                    </p>
+                    <p className="text-xs text-white/60">
+                      目标 {formatMoney(w.target_amount)}
+                    </p>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── 心愿表单弹出框（新建 / 编辑） ── */}
+        {editingIndex >= -1 && (
           <div className="mx-4 mt-3 rounded-2xl border border-teal-100 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-sm font-bold text-teal-700">
-                {activeWishlist ? "✏️ 编辑心愿" : "✨ 新建心愿"}
+                {editingIndex >= 0 ? "✏️ 编辑心愿" : "✨ 新建心愿"}
               </p>
               <button
                 className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
-                onClick={() => setShowWishEdit(false)}
+                onClick={closeWishForm}
                 type="button"
               >
                 <X className="h-4 w-4" />
@@ -653,7 +731,7 @@ export default function Home() {
                 disabled={!(parseFloat(wishFormTarget) > 0)}
                 type="button"
               >
-                {activeWishlist ? "保存修改" : "创建心愿"}
+                {editingIndex >= 0 ? "保存修改" : "创建心愿"}
               </button>
             </div>
           </div>
@@ -691,110 +769,88 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── 多心愿列表（展开/折叠） ── */}
-        {wishlists.length > 0 && (
-          <div className="mx-4 mt-3">
-            <button
-              className="flex w-full items-center justify-between rounded-2xl border border-emerald-100 bg-mint-50/80 px-3 py-2 text-xs font-semibold text-emerald-700"
-              onClick={() => setShowStats((v) => !v)}
-              type="button"
-            >
-              <span className="flex items-center gap-1.5">
-                <PiggyBank className="h-4 w-4" />
-                全部心愿（{wishlists.length}）
+
+        {/* ── 消费统计卡片（常驻，有记录即显示） ── */}
+        {expenseRecords.length > 0 && (
+          <div className="mx-4 mt-3 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <Coffee className="h-4 w-4 text-emerald-500" />
+                本月消费
               </span>
-              {showStats ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </button>
+              <span className="text-xs font-black text-slate-800">{formatMoney(totalSpent)}</span>
+            </div>
 
-            {showStats && (
-              <div className="mt-2 space-y-2">
-                {/* 多心愿卡片 */}
-                {wishlists.map((w, idx) => (
-                  <button
-                    key={w.id}
-                    className={`w-full rounded-2xl border p-3 text-left shadow-sm transition-all ${
-                      idx === activeWishlistIndex
-                        ? "border-emerald-300 bg-emerald-50"
-                        : "border-slate-100 bg-white hover:border-emerald-200"
-                    }`}
-                    onClick={() => setActiveWishlistIndex(idx)}
-                    type="button"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-slate-800">{w.name}</span>
-                      <span className="text-xs text-slate-400">
-                        {formatMoney(w.saved_amount)} / {formatMoney(w.target_amount)}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-1.5 rounded-full bg-emerald-400 transition-all"
-                        style={{ width: `${calcProgress(w.saved_amount, w.target_amount)}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-xs text-slate-400">
-                      {calcProgress(w.saved_amount, w.target_amount)}% · 每月存 {formatMoney(calcMonthlyNeeded(w))} · {w.months}个月
-                    </p>
-                  </button>
-                ))}
-
-                {/* 消费统计区 */}
-                {expenseRecords.length > 0 && (
-                  <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-                    <p className="mb-3 text-xs font-semibold text-slate-600">
-                      本月消费统计 · 共 {formatMoney(totalSpent)}
-                    </p>
-
-                    {/* 饼图 */}
-                    <div className="h-36">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={categoryStats}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={36}
-                            outerRadius={60}
-                            paddingAngle={2}
-                            dataKey="value"
-                          >
-                            {categoryStats.map((entry, index) => (
-                              <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value) => [formatMoney(Number(value)), "消费"]}
-                            contentStyle={{
-                              borderRadius: "12px",
-                              fontSize: "12px",
-                              border: "1px solid #d1fae5",
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    {/* 分类列表 */}
-                    <div className="mt-2 space-y-1.5">
-                      {categoryStats.map((stat, idx) => (
-                        <div key={stat.name} className="flex items-center gap-2">
-                          <div
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}
-                          />
-                          <span className="text-xs text-slate-600">
-                            {CATEGORY_EMOJI[stat.name] ?? "💰"} {stat.name}
-                          </span>
-                          <div className="flex-1" />
-                          <span className="text-xs font-semibold text-slate-800">{formatMoney(stat.value)}</span>
-                          <span className="w-8 text-right text-xs text-slate-400">
-                            {totalSpent > 0 ? Math.round((stat.value / totalSpent) * 100) : 0}%
-                          </span>
-                        </div>
+            {/* 饼图 + 分类列表并排 */}
+            <div className="mt-2 flex items-center gap-3">
+              {/* 饼图 */}
+              <div className="h-28 w-28 shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={categoryStats}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={28}
+                      outerRadius={48}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {categoryStats.map((entry, index) => (
+                        <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                       ))}
-                    </div>
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => [formatMoney(Number(value)), "消费"]}
+                      contentStyle={{
+                        borderRadius: "12px",
+                        fontSize: "12px",
+                        border: "1px solid #d1fae5",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* 分类列表 */}
+              <div className="flex-1 space-y-1.5 overflow-hidden">
+                {categoryStats.slice(0, 5).map((stat, idx) => (
+                  <div key={stat.name} className="flex items-center gap-1.5">
+                    <div
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}
+                    />
+                    <span className="truncate text-xs text-slate-600">
+                      {CATEGORY_EMOJI[stat.name] ?? "💰"} {stat.name}
+                    </span>
+                    <div className="flex-1" />
+                    <span className="shrink-0 text-xs font-semibold text-slate-800">{formatMoney(stat.value)}</span>
+                    <span className="w-7 shrink-0 text-right text-xs text-slate-400">
+                      {totalSpent > 0 ? Math.round((stat.value / totalSpent) * 100) : 0}%
+                    </span>
                   </div>
+                ))}
+                {categoryStats.length > 5 && (
+                  <p className="text-xs text-slate-400">还有 {categoryStats.length - 5} 个分类…</p>
                 )}
+              </div>
+            </div>
+
+            {/* 预算使用进度条 */}
+            {budgetTotal > 0 && (
+              <div className="mt-3 border-t border-slate-50 pt-3">
+                <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                  <span>预算已用 {Math.round(budgetUsedRatio * 100)}%</span>
+                  <span>剩余 {formatMoney(budgetLeft)}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-1.5 rounded-full transition-all ${
+                      budgetDanger ? "bg-red-400" : budgetWarning ? "bg-amber-400" : "bg-emerald-400"
+                    }`}
+                    style={{ width: `${budgetUsedRatio * 100}%` }}
+                  />
+                </div>
               </div>
             )}
           </div>
