@@ -230,7 +230,11 @@ export default function Home() {
   const [budgetInput, setBudgetInput] = useState("");
   const [activeQuickGroup, setActiveQuickGroup] = useState(0);
   const [showWishEdit, setShowWishEdit] = useState(false);
-  const [wishInput, setWishInput] = useState("");
+  // 心愿表单字段
+  const [wishFormName, setWishFormName] = useState("");
+  const [wishFormTarget, setWishFormTarget] = useState("");
+  const [wishFormMonths, setWishFormMonths] = useState("");
+  const [wishFormSaved, setWishFormSaved] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -365,14 +369,61 @@ export default function Home() {
     setBudgetInput("");
   }
 
-  // ── 心愿快捷输入 ──
-  function applyWishEdit() {
-    const text = wishInput.trim();
-    if (text) {
-      void sendMessage(text);
+  // ── 打开心愿编辑表单（预填当前活跃心愿数据）──
+  function openWishEdit() {
+    if (activeWishlist) {
+      setWishFormName(activeWishlist.name);
+      setWishFormTarget(String(activeWishlist.target_amount || ""));
+      setWishFormMonths(String(activeWishlist.months || "12"));
+      setWishFormSaved(String(activeWishlist.saved_amount || "0"));
+    } else {
+      setWishFormName("");
+      setWishFormTarget("");
+      setWishFormMonths("12");
+      setWishFormSaved("0");
     }
+    setShowWishEdit((v) => !v);
+  }
+
+  // ── 提交心愿表单 ──
+  function applyWishEdit() {
+    const name = wishFormName.trim() || "我的心愿";
+    const target = parseFloat(wishFormTarget) || 0;
+    const months = Math.max(1, parseInt(wishFormMonths) || 12);
+    const saved = Math.max(0, parseFloat(wishFormSaved) || 0);
+
+    if (target <= 0) return; // 目标金额必填
+
+    const updatedWishlists = [...wishlists];
+    if (activeWishlist && activeWishlistIndex < updatedWishlists.length) {
+      // 编辑现有心愿
+      updatedWishlists[activeWishlistIndex] = {
+        ...updatedWishlists[activeWishlistIndex],
+        name,
+        target_amount: target,
+        months,
+        saved_amount: saved,
+      };
+    } else {
+      // 新建心愿
+      updatedWishlists.push({
+        id: Math.random().toString(36).slice(2, 10),
+        name,
+        target_amount: target,
+        months,
+        saved_amount: saved,
+      });
+      setActiveWishlistIndex(updatedWishlists.length - 1);
+    }
+    setWishlists(updatedWishlists);
     setShowWishEdit(false);
-    setWishInput("");
+
+    // 发一条自然语言给 AI，让它给出鼓励/规划反馈
+    const remaining = Math.max(0, target - saved);
+    const monthlySaving = Math.ceil((remaining / months) * 100) / 100;
+    void sendMessage(
+      `我设置了「${name}」心愿，目标 ${target} 元，已攒 ${saved} 元，计划 ${months} 个月完成，每月需攒 ${monthlySaving} 元。`
+    );
   }
 
   // ── 重置数据 ──
@@ -476,7 +527,7 @@ export default function Home() {
           {/* 心愿卡片 */}
           <button
             className="rounded-3xl bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-400 p-4 text-white shadow-sm transition-all hover:brightness-105 active:scale-[0.98] text-left w-full"
-            onClick={() => setShowWishEdit((v) => !v)}
+            onClick={openWishEdit}
             type="button"
           >
             <div className="flex items-center justify-between">
@@ -512,33 +563,97 @@ export default function Home() {
           </button>
         </section>
 
-        {/* ── 心愿快捷输入弹出框 ── */}
+        {/* ── 心愿编辑表单弹出框 ── */}
         {showWishEdit && (
-          <div className="mx-4 mt-3 rounded-2xl border border-teal-100 bg-white p-3 shadow-sm">
-            <p className="mb-2 text-xs font-semibold text-slate-600">告诉我你的心愿</p>
-            <div className="flex gap-2">
-              <input
-                autoFocus
-                className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400"
-                onChange={(e) => setWishInput(e.target.value)}
-                placeholder="如：12个月攒6000买耳机，或：今天存了200"
-                type="text"
-                value={wishInput}
-                onKeyDown={(e) => e.key === "Enter" && applyWishEdit()}
-              />
+          <div className="mx-4 mt-3 rounded-2xl border border-teal-100 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-bold text-teal-700">
+                {activeWishlist ? "✏️ 编辑心愿" : "✨ 新建心愿"}
+              </p>
               <button
-                className="rounded-xl bg-teal-500 px-4 py-2 text-sm font-semibold text-white"
-                onClick={applyWishEdit}
-                type="button"
-              >
-                确认
-              </button>
-              <button
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500"
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
                 onClick={() => setShowWishEdit(false)}
                 type="button"
               >
                 <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {/* 心愿名称 */}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">心愿名称</label>
+                <input
+                  autoFocus
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400"
+                  onChange={(e) => setWishFormName(e.target.value)}
+                  placeholder="如：换耳机、旅行基金、新电脑…"
+                  type="text"
+                  value={wishFormName}
+                />
+              </div>
+
+              {/* 目标金额 + 计划月数 */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">目标金额（元）</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400"
+                    onChange={(e) => setWishFormTarget(e.target.value)}
+                    placeholder="如 6000"
+                    type="number"
+                    min="0"
+                    value={wishFormTarget}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">计划月数</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400"
+                    onChange={(e) => setWishFormMonths(e.target.value)}
+                    placeholder="如 12"
+                    type="number"
+                    min="1"
+                    value={wishFormMonths}
+                  />
+                </div>
+              </div>
+
+              {/* 已攒金额 */}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">已攒金额（元）</label>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400"
+                  onChange={(e) => setWishFormSaved(e.target.value)}
+                  placeholder="还没开始存就填 0"
+                  type="number"
+                  min="0"
+                  value={wishFormSaved}
+                />
+              </div>
+
+              {/* 预览每月需存 */}
+              {parseFloat(wishFormTarget) > 0 && parseInt(wishFormMonths) > 0 && (
+                <div className="rounded-xl bg-teal-50 px-3 py-2 text-xs text-teal-700">
+                  💡 每月需存约{" "}
+                  <span className="font-bold">
+                    ¥{Math.ceil((Math.max(0, parseFloat(wishFormTarget) - parseFloat(wishFormSaved || "0")) / parseInt(wishFormMonths)) * 100) / 100}
+                  </span>{" "}
+                  元，{parseInt(wishFormMonths)} 个月后实现心愿 🎯
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                className={`flex-1 rounded-xl py-2 text-sm font-semibold text-white transition-colors ${
+                  parseFloat(wishFormTarget) > 0 ? "bg-teal-500 hover:bg-teal-600" : "cursor-not-allowed bg-slate-300"
+                }`}
+                onClick={applyWishEdit}
+                disabled={!(parseFloat(wishFormTarget) > 0)}
+                type="button"
+              >
+                {activeWishlist ? "保存修改" : "创建心愿"}
               </button>
             </div>
           </div>
