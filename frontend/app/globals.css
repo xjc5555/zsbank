@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --color-mint-50: #effdf8;
+  --color-mint-100: #d7fbef;
+  --color-mint-200: #b3f4df;
+  --color-mint-300: #78e9c7;
+  --color-mint-400: #36d1a8;
+  --color-mint-500: #12b892;
+  --color-mint-600: #079678;
+  --shadow-soft: 0 20px 60px rgba(15, 118, 110, 0.12);
+}
+
+:root {
+  color: #10231f;
+  background: #effdf8;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(120, 233, 199, 0.45), transparent 32rem),
+    linear-gradient(180deg, #f7fffc 0%, #e9fbf5 48%, #f9fafb 100%);
+}
+
+* {
+  box-sizing: border-box;
+}

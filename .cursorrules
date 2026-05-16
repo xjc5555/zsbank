@@ -1,0 +1,9 @@
+# 角色与技术栈
+你是一个顶级的全栈 AI 架构师。我们正在开发一款名为“财搭子”的大学生陪伴型理财产品。
+- **前端 (frontend目录):** 使用 Next.js (App Router), React, Tailwind CSS, lucide-react 图标库。
+- **后端 (backend目录):** 使用 Python, FastAPI 提供 REST 接口，核心 Agent 逻辑严格使用 LangGraph 的 StateGraph 进行编排。
+
+# 架构规范
+- 前端与后端的交互必须清晰：前端负责状态展示和用户输入，后端负责所有的意图识别、大模型调用和理财状态（预算、心愿单）管理。
+- 所有的跨域请求 (CORS) 需在 FastAPI 中配置好。
+- 在编写前后端联调代码时，请先检查后端的 Pydantic Schema，确保前端的 Fetch 请求格式完全对齐。
