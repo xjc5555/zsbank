@@ -66,7 +66,7 @@ type ChatResponse = {
 
 // ─────────────────── 常量 ───────────────────
 
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://zsbank-production.up.railway.app";
 
 const STORAGE_KEY = "finbuddy_state_v2";
 
