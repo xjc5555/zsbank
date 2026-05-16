@@ -1,0 +1,10 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_PUBLIC_BACKEND_URL = "https://zsbank-production.up.railway.app"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
