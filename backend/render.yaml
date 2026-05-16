@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: finbuddy-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FINBUDDY_LLM_API_KEY
+        sync: false
+      - key: FINBUDDY_LLM_BASE_URL
+        value: https://api.deepseek.com
+      - key: FINBUDDY_LLM_MODEL
+        value: deepseek-chat
+      - key: FINBUDDY_LLM_TEMPERATURE
+        value: "0.7"
+      - key: FRONTEND_ORIGIN
+        sync: false
