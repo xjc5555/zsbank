@@ -92,7 +92,7 @@ const quickPromptGroups = [
   },
   {
     label: "心愿",
-    prompts: ["我想12个月攒12000元换电脑", "今天往心愿里存了200元"],
+    prompts: ["我想攒钱买电脑", "今天往心愿里存了200元"],
   },
   {
     label: "理财",
@@ -229,6 +229,8 @@ export default function Home() {
   const [showBudgetEdit, setShowBudgetEdit] = useState(false);
   const [budgetInput, setBudgetInput] = useState("");
   const [activeQuickGroup, setActiveQuickGroup] = useState(0);
+  const [showWishEdit, setShowWishEdit] = useState(false);
+  const [wishInput, setWishInput] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -363,6 +365,16 @@ export default function Home() {
     setBudgetInput("");
   }
 
+  // ── 心愿快捷输入 ──
+  function applyWishEdit() {
+    const text = wishInput.trim();
+    if (text) {
+      void sendMessage(text);
+    }
+    setShowWishEdit(false);
+    setWishInput("");
+  }
+
   // ── 重置数据 ──
   async function handleReset() {
     if (!window.confirm("确定要清空所有记录吗？")) return;
@@ -462,36 +474,75 @@ export default function Home() {
           </div>
 
           {/* 心愿卡片 */}
-          <div className="rounded-3xl bg-slate-950 p-4 text-white shadow-sm">
+          <button
+            className="rounded-3xl bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-400 p-4 text-white shadow-sm transition-all hover:brightness-105 active:scale-[0.98] text-left w-full"
+            onClick={() => setShowWishEdit((v) => !v)}
+            type="button"
+          >
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-mint-200">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-white/90">
                 <CalendarHeart className="h-4 w-4" />
                 {activeWishlist ? activeWishlist.name : "心愿"}
               </div>
-              {wishlists.length > 1 && (
-                <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-xs text-white/70">
-                  {activeWishlistIndex + 1}/{wishlists.length}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {wishlists.length > 1 && (
+                  <span className="rounded-full bg-white/25 px-1.5 py-0.5 text-xs text-white/90">
+                    {activeWishlistIndex + 1}/{wishlists.length}
+                  </span>
+                )}
+                <Pencil className="h-3.5 w-3.5 text-white/70" />
+              </div>
             </div>
             {activeWishlist ? (
               <>
-                <p className="mt-2 text-2xl font-black">{calcProgress(activeWishlist.saved_amount, activeWishlist.target_amount)}%</p>
-                <div className="mt-2 h-1.5 rounded-full bg-white/15">
+                <p className="mt-2 text-2xl font-black text-white">{calcProgress(activeWishlist.saved_amount, activeWishlist.target_amount)}%</p>
+                <div className="mt-2 h-1.5 rounded-full bg-white/30">
                   <div
-                    className="h-1.5 rounded-full bg-mint-300 transition-all"
+                    className="h-1.5 rounded-full bg-white transition-all"
                     style={{ width: `${calcProgress(activeWishlist.saved_amount, activeWishlist.target_amount)}%` }}
                   />
                 </div>
-                <p className="mt-1 text-xs text-white/50">
+                <p className="mt-1 text-xs text-white/75">
                   月存 {formatMoney(calcMonthlyNeeded(activeWishlist))} · 目标 {formatMoney(activeWishlist.target_amount)}
                 </p>
               </>
             ) : (
-              <p className="mt-3 text-sm text-white/50">告诉我你想攒什么，我来帮你拆计划</p>
+              <p className="mt-3 text-sm text-white/80">点击输入心愿，我帮你拆计划 ✨</p>
             )}
-          </div>
+          </button>
         </section>
+
+        {/* ── 心愿快捷输入弹出框 ── */}
+        {showWishEdit && (
+          <div className="mx-4 mt-3 rounded-2xl border border-teal-100 bg-white p-3 shadow-sm">
+            <p className="mb-2 text-xs font-semibold text-slate-600">告诉我你的心愿</p>
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400"
+                onChange={(e) => setWishInput(e.target.value)}
+                placeholder="如：12个月攒6000买耳机，或：今天存了200"
+                type="text"
+                value={wishInput}
+                onKeyDown={(e) => e.key === "Enter" && applyWishEdit()}
+              />
+              <button
+                className="rounded-xl bg-teal-500 px-4 py-2 text-sm font-semibold text-white"
+                onClick={applyWishEdit}
+                type="button"
+              >
+                确认
+              </button>
+              <button
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500"
+                onClick={() => setShowWishEdit(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── 预算编辑弹出框 ── */}
         {showBudgetEdit && (

@@ -210,7 +210,7 @@ _INTENT_SYSTEM = """
 请根据用户最新一句话，从以下5类意图中选择最合适的一类，只输出意图名称，不要有任何多余文字：
 
 - 记账        （记录一笔支出，如"买奶茶花了18元"）
-- 心愿规划    （设定/更新储蓄目标或存入进度，如"我想攒12000换电脑"、"今天攒了200"）
+- 心愿规划    （设定/更新储蓄目标或存入进度，如"我想6个月攒6000买耳机"、"今天攒了200"）
 - 高危咨询    （涉及刷单、校园贷、高收益稳赚、套现等）
 - 理财问答    （询问理财知识，如"货币基金是什么"）
 - 日常闲聊    （其他所有情况）
@@ -219,7 +219,7 @@ _INTENT_SYSTEM = """
 _INTENT_EXAMPLES = [
     ("今天午饭吃了26元", "记账"),
     ("外卖花了35块", "记账"),
-    ("我想12个月攒12000元换电脑", "心愿规划"),
+    ("我想6个月攒6000元买耳机", "心愿规划"),
     ("今天存了300", "心愿规划"),
     ("有人让我刷单说日入500", "高危咨询"),
     ("校园贷利息高不高", "高危咨询"),
@@ -399,8 +399,8 @@ class ReversePlannerNode:
             wishlists[idx] = WishlistItem(**item)
             active_idx = idx
         else:
-            # 没有任何心愿，创建默认
-            target = max(amounts_yuan) if amounts_yuan else 12000.0
+            # 没有任何心愿，从用户输入提取金额，若无法提取则设为0并引导用户补充
+            target = max(amounts_yuan) if amounts_yuan else 0.0
             months = _extract_months(text)
             name = _extract_wishlist_name(text)
             wishlists.append(WishlistItem(
@@ -416,9 +416,37 @@ class ReversePlannerNode:
         active = wishlists[active_idx]
         remaining = max(0.0, float(active["target_amount"]) - float(active["saved_amount"]))
         months = int(active["months"])
-        monthly_saving = ceil((remaining / months) * 100) / 100 if months else 0.0
+        monthly_saving = ceil((remaining / months) * 100) / 100 if months and float(active["target_amount"]) > 0 else 0.0
 
         deposit_note = f"我已帮你把 {deposit_amount:.2f} 元计入「{active['name']}」进度。" if deposit_amount else ""
+
+        # 目标金额为0时，引导用户提供目标金额
+        if float(active["target_amount"]) <= 0:
+            ask_target_fallback = (
+                f"好的，「{active['name']}」心愿已经建好了！"
+                "不过我还没看到你的目标金额，帮我补充一下：\n"
+                "比如：「我想攒 5000 元」或「目标是 8000 元，打算 10 个月搞定」"
+            )
+            ask_target_task = (
+                f"心愿「{active['name']}」已创建，但用户未提供目标金额。"
+                "请用轻松的口吻引导用户说出具体的目标金额和计划月数，不要假设或捏造金额。"
+            )
+            reply = generate_finbuddy_reply(
+                task=ask_target_task,
+                user_text=text,
+                state={
+                    **state,
+                    "intent": "心愿规划",
+                    "wishlists": wishlists,
+                    "active_wishlist_index": active_idx,
+                },
+                fallback=ask_target_fallback,
+            )
+            return {
+                "wishlists": wishlists,
+                "active_wishlist_index": active_idx,
+                "messages": _append_reply(state, reply),
+            }
 
         fallback = (
             f"{deposit_note}"
