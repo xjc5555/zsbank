@@ -88,7 +88,7 @@ const starterMessages: ChatMessage[] = [
 const quickPromptGroups = [
   {
     label: "记账",
-    prompts: ["今天买奶茶花了18元", "午饭吃了26元", "打车花了15块"],
+    prompts: ["今天买奶茶花了18元", "午饭吃了26元", "打车花了15块", "奖学金到账500元", "生活费到了1500元"],
   },
   {
     label: "心愿",

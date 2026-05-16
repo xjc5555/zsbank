@@ -13,6 +13,7 @@ from app.state import ExpenseItem, FinanceProfile, FinBuddyState, Intent, Wishli
 
 HIGH_RISK_KEYWORDS = ("兼职刷单", "校园贷", "高收益", "刷流水", "套现", "裸贷", "返利", "稳赚")
 BOOKKEEPING_KEYWORDS = ("花了", "消费", "买了", "支出", "记账", "付款", "吃饭", "奶茶", "打车")
+INCOME_KEYWORDS = ("收入", "赚了", "赚到", "到账", "进账", "工资", "奖学金", "生活费到了", "兼职收了", "红包", "零花钱", "发工资", "报销", "转来了", "发了", "收到钱")
 WISHLIST_KEYWORDS = ("心愿", "攒钱", "计划", "目标", "买电脑", "换电脑", "旅行", "存钱", "攒够")
 SAVINGS_DEPOSIT_KEYWORDS = ("存入", "攒了", "往里存", "多攒", "储蓄到账", "本月存入", "今天攒")
 BUDGET_SET_KEYWORDS = ("设置预算", "预算改为", "月预算", "生活费是", "每月预算", "预算设为", "设定预算")
@@ -101,6 +102,26 @@ def _append_reply(state: FinBuddyState, text: str) -> list:
 def _extract_amount(text: str) -> Optional[float]:
     match = re.search(r"(\d+(?:\.\d+)?)\s*(?:元|块|rmb|RMB)?", text)
     return float(match.group(1)) if match else None
+
+
+def _is_income(text: str) -> bool:
+    """判断是否为收入记录（而非支出）"""
+    return any(kw in text for kw in INCOME_KEYWORDS)
+
+
+def _classify_income_category(text: str) -> str:
+    """识别收入来源分类"""
+    if any(kw in text for kw in ("工资", "发工资", "薪资")):
+        return "工资"
+    if any(kw in text for kw in ("奖学金",)):
+        return "奖学金"
+    if any(kw in text for kw in ("兼职", "打工")):
+        return "兼职收入"
+    if any(kw in text for kw in ("红包", "零花钱", "生活费")):
+        return "生活费/红包"
+    if any(kw in text for kw in ("报销",)):
+        return "报销"
+    return "其他收入"
 
 
 def _is_savings_deposit(text: str) -> bool:
@@ -209,7 +230,7 @@ _INTENT_SYSTEM = """
 你是大学生理财助手"财搭子"的意图分类器。
 请根据用户最新一句话，从以下5类意图中选择最合适的一类，只输出意图名称，不要有任何多余文字：
 
-- 记账        （记录一笔支出，如"买奶茶花了18元"）
+- 记账        （记录一笔支出或收入，如"买奶茶花了18元"、"奖学金到账500元"、"工资发了1000元"）
 - 心愿规划    （设定/更新储蓄目标或存入进度，如"我想6个月攒6000买耳机"、"今天攒了200"）
 - 高危咨询    （涉及刷单、校园贷、高收益稳赚、套现等）
 - 理财问答    （询问理财知识，如"货币基金是什么"）
@@ -219,6 +240,8 @@ _INTENT_SYSTEM = """
 _INTENT_EXAMPLES = [
     ("今天午饭吃了26元", "记账"),
     ("外卖花了35块", "记账"),
+    ("奖学金到账500元", "记账"),
+    ("工资发了1000元", "记账"),
     ("我想6个月攒6000元买耳机", "心愿规划"),
     ("今天存了300", "心愿规划"),
     ("有人让我刷单说日入500", "高危咨询"),
@@ -267,6 +290,9 @@ def _keyword_classify_intent(text: str) -> Intent:
         return "心愿规划"
     if any(kw in text for kw in FINANCE_QA_KEYWORDS):
         return "理财问答"
+    # 收入和支出都路由到记账节点
+    if any(kw in text for kw in INCOME_KEYWORDS):
+        return "记账"
     if any(kw in text for kw in BOOKKEEPING_KEYWORDS) or _extract_amount(text) is not None:
         return "记账"
     return "日常闲聊"
@@ -298,13 +324,43 @@ class BookkeeperNode:
     def __call__(self, state: FinBuddyState) -> dict:
         text = _latest_text(state)
         amount = _extract_amount(text) or 0.0
+        budget_total = state.get("budget_total", 1500.0)
+        budget_left = state["budget_left"]
+        expense_records: list[ExpenseItem] = list(state.get("expense_records") or [])
+
+        # ── 判断是收入还是支出 ──
+        if _is_income(text) and amount > 0:
+            income_category = _classify_income_category(text)
+            # 收入：同时增加剩余预算和总预算
+            budget_left = budget_left + amount
+            budget_total = budget_total + amount
+
+            fallback = (
+                f"好嘞，{income_category} {amount:.2f} 元已记录！"
+                f"本月预算更新为 {budget_total:.2f} 元，当前还剩 {budget_left:.2f} 元。"
+                "收入进账，继续保持，钱包厚了底气也足 💪"
+            )
+            reply = generate_finbuddy_reply(
+                task=(
+                    f"收入记账反馈。收入来源：{income_category}，金额{amount:.2f}元，"
+                    f"已同步增加月度总预算至{budget_total:.2f}元，当前剩余预算{budget_left:.2f}元。"
+                    "请用轻松口吻给予鼓励，不超过60字。"
+                ),
+                user_text=text,
+                state={**state, "budget_left": budget_left, "budget_total": budget_total},
+                fallback=fallback,
+            )
+            return {
+                "budget_total": budget_total,
+                "budget_left": budget_left,
+                "messages": _append_reply(state, reply),
+            }
+
+        # ── 支出逻辑 ──
         category = _classify_category(text)
         record = ExpenseRecord(amount=amount, category=category)
-        budget_left = max(0.0, state["budget_left"] - record.amount)
-        budget_total = state.get("budget_total", 1500.0)
+        budget_left = max(0.0, budget_left - record.amount)
 
-        # 更新消费记录列表
-        expense_records: list[ExpenseItem] = list(state.get("expense_records") or [])
         if record.amount > 0:
             expense_records.append(
                 ExpenseItem(amount=record.amount, category=category, note=text[:30])
